@@ -1,13 +1,14 @@
 import { getToken, clearAuth } from "../utils/auth";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_BASE = "/api";
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-    if (!API_URL) throw new Error("VITE_API_URL is not set");
-
+export async function api<T>(
+    path: string,
+    options: RequestInit = {}
+): Promise<T> {
     const token = getToken();
 
-    const res = await fetch(`${API_URL}${path}`, {
+    const res = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers: {
             "Content-Type": "application/json",
@@ -16,7 +17,6 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         },
     });
 
-    // If backend says unauthorized → kill token and force login
     if (res.status === 401) {
         clearAuth();
     }
