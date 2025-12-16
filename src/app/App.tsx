@@ -1,6 +1,15 @@
-import Board from "../components/Board/Board";
+import AppRoutes from "./routes";
+import { clearAuth, getRole, isAuthed } from "../utils/auth";
+import { useNavigate } from "react-router-dom";
 
 export default function App() {
+    const nav = useNavigate();
+
+    function logout() {
+        clearAuth();
+        nav("/login", { replace: true });
+    }
+
     return (
         <div className="app-shell">
             <header className="topbar">
@@ -12,13 +21,18 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="topbar__right">
-                    <span className="pill">Netlify ready</span>
+                <div className="topbar__right" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    {isAuthed() ? <span className="pill">Роль: {getRole() || "—"}</span> : null}
+                    {isAuthed() ? (
+                        <button className="btn" onClick={logout} type="button">
+                            Выйти
+                        </button>
+                    ) : null}
                 </div>
             </header>
 
             <main className="app-main">
-                <Board />
+                <AppRoutes />
             </main>
         </div>
     );

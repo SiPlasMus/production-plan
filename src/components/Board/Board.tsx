@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { api } from "../../api/http";
+import {useEffect, useMemo, useState} from "react";
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { closestCenter } from "@dnd-kit/core";
 import type { ProductionCard } from "../../types/card";
@@ -45,22 +46,47 @@ export default function Board() {
         })
     );
     // demo initial cards (you can remove)
-    const [leftCards, setLeftCards] = useState<ProductionCard[]>([
-        {
-            id: makeId(),
-            client: "Жасур",
-            rank: "Ок мат",
-            micron: 20,
-            thickness: 4,
-            sheetSize: "стандарт",
-            qtySheets: 400,
-            qtyWarehouse: 600,
-            date: "2026-01-10",
-            note: "перечисление",
-        },
-    ]);
+    const [leftCards, setLeftCards] = useState<ProductionCard[]>([]);
     const [rightCards, setRightCards] = useState<ProductionCard[]>([]);
     const [dayCards, setDayCards] = useState<Record<string, ProductionCard[]>>({});
+
+    useEffect(() => {
+        (async () => {
+            const res = await api<{ ok: boolean; cards: any[] }>("/pp/board");
+            const left: ProductionCard[] = [];
+            const right: ProductionCard[] = [];
+            const days: Record<string, ProductionCard[]> = {};
+
+            for (const r of res.cards) {
+                const c: ProductionCard = {
+                    id: String(r.Id),
+                    client: String(r.Client || ""),
+                    rank: String(r.Rank || ""),
+                    micron: Number(r.Micron || 0),
+                    thickness: Number(r.Thickness || 0),
+                    sheetSize: String(r.SheetSize || ""),
+                    qtySheets: Number(r.QtySheets || 0),
+                    qtyWarehouse: Number(r.QtyWarehouse || 0),
+                    date: String(r.PlanDate || ""),
+                    note: String(r.Note || ""),
+                };
+
+                const t = String(r.ContainerType || "");
+                const k = String(r.ContainerKey || "");
+
+                if (t === "LEFT") left.push(c);
+                else if (t === "RIGHT") right.push(c);
+                else if (t === "DAY") {
+                    const dk = `day:${k}`;
+                    (days[dk] ||= []).push(c);
+                }
+            }
+
+            setLeftCards(left);
+            setRightCards(right);
+            setDayCards(days);
+        })().catch(console.error);
+    }, []);
 
     const days = useMemo(() => {
         const start = isoToday();
