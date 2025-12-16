@@ -7,7 +7,7 @@ export default defineConfig({
     server: {
         proxy: {
             "/api": {
-                target: "https://altitude-backend.uz/api", // or your local backend
+                target: "https://altitude-backend.uz", // or your local backend
                 changeOrigin: true,
             },
         },
