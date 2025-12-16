@@ -9,6 +9,7 @@ export default defineConfig({
             "/api": {
                 target: "https://altitude-backend.uz", // or your local backend
                 changeOrigin: true,
+                secure: true, // keep true for valid https cert
             },
         },
     },

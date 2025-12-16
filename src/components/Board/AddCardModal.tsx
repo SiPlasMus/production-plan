@@ -13,6 +13,12 @@ type Props = {
     onCreate: (payload: Omit<ProductionCard, "id">) => void;
     onUpdate: (id: string, payload: Omit<ProductionCard, "id">) => void;
     onDelete: (id: string) => void;
+
+    // ✅ NEW: parent switches modal into edit mode
+    onRequestEdit?: () => void;
+
+    // ✅ optional: allow/deny editing (roles logic from parent)
+    canEdit?: boolean;
 };
 
 function toISODate(d: string) {
@@ -32,8 +38,10 @@ export default function AddCardModal({
                                          onCreate,
                                          onUpdate,
                                          onDelete,
+                                         onRequestEdit,
+                                         canEdit = true,
                                      }: Props) {
-    const isReadOnly = mode === "view";
+    const isReadOnly = mode === "view" || !canEdit;
 
     const title = useMemo(() => {
         if (mode === "create") return "Новая карточка";
@@ -107,16 +115,43 @@ export default function AddCardModal({
         onOpenChange(false);
     }
 
+    const showEditButton = mode === "view" && Boolean(card?.id) && Boolean(onRequestEdit) && canEdit;
+
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Portal>
                 <Dialog.Overlay className="pp-modal-overlay" />
-                <Dialog.Content className="pp-modal">
+                <Dialog.Content className="pp-modal" aria-describedby="pp-modal-desc">
                     <div className="pp-modal__head">
-                        <Dialog.Title className="pp-modal__title">{title}</Dialog.Title>
-                        <Dialog.Close className="pp-btn pp-btn--ghost" aria-label="Close">
-                            ✕
-                        </Dialog.Close>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <Dialog.Title className="pp-modal__title">{title}</Dialog.Title>
+                            {/* ✅ fixes Radix warning */}
+                            <Dialog.Description id="pp-modal-desc" style={{ fontSize: 12, opacity: 0.65 }}>
+                                {mode === "create"
+                                    ? "Заполните поля и нажмите «Создать»"
+                                    : mode === "edit"
+                                        ? "Измените поля и нажмите «Сохранить»"
+                                        : canEdit
+                                            ? "Просмотр карточки. Можно перейти в режим редактирования."
+                                            : "Просмотр карточки. Нет прав на редактирование."}
+                            </Dialog.Description>
+                        </div>
+
+                        <div className="pp-modal__headActions">
+                            {showEditButton ? (
+                                <button
+                                    className="pp-btn pp-btn--primary"
+                                    type="button"
+                                    onClick={() => onRequestEdit?.()}
+                                >
+                                    ✎ Редактировать
+                                </button>
+                            ) : null}
+
+                            <Dialog.Close className="pp-btn pp-btn--ghost" aria-label="Close">
+                                ✕
+                            </Dialog.Close>
+                        </div>
                     </div>
 
                     <div className="pp-modal__body">
@@ -223,7 +258,7 @@ export default function AddCardModal({
 
                     <div className="pp-modal__footer">
                         <div className="flex gap-2">
-                            {mode !== "create" && card?.id && (
+                            {mode !== "create" && card?.id && canEdit && (
                                 <>
                                     {!confirmDelete ? (
                                         <button
@@ -268,7 +303,7 @@ export default function AddCardModal({
                                 Закрыть
                             </button>
 
-                            {mode !== "view" && (
+                            {mode !== "view" && canEdit && (
                                 <button className="pp-btn pp-btn--primary" onClick={submit} type="button">
                                     {mode === "create" ? "Создать" : "Сохранить"}
                                 </button>

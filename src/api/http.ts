@@ -22,6 +22,11 @@ export async function api<T>(
     }
 
     if (!res.ok) {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+            const j = await res.json();
+            throw new Error(j?.error || JSON.stringify(j));
+        }
         const text = await res.text();
         throw new Error(text || res.statusText);
     }

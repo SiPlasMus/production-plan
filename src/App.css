@@ -430,3 +430,9 @@
     border-radius: 12px;
     background: rgba(255,255,255,0.05);
 }
+
+.pp-modal__headActions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}

@@ -132,6 +132,22 @@ export default function Board() {
         return null;
     }
 
+    function containerTypeOf(container: string | null): "LEFT" | "RIGHT" | "DAY" | null {
+        if (!container) return null;
+        if (container === LEFT) return "LEFT";
+        if (container === RIGHT) return "RIGHT";
+        if (container.startsWith("day:")) return "DAY";
+        return null;
+    }
+
+    const canEditThisCard = useMemo(() => {
+        if (!activeCard) return true; // create mode etc.
+        const container = findContainerByCardId(activeCard.id);
+        const ct = containerTypeOf(container);
+        if (!ct) return false;
+        return canEditPerm(role, ct);
+    }, [activeCard, findContainerByCardId, role]);
+
     function removeFromContainer(container: string, cardId: string): ProductionCard | null {
         if (container === LEFT) {
             const idx = leftCards.findIndex((c) => c.id === cardId);
@@ -214,8 +230,8 @@ export default function Board() {
     async function handleUpdate(id: string, payload: Omit<ProductionCard, "id">) {
         const container = findContainerByCardId(id);
         const containerType =
-            container === "left" ? "LEFT" :
-                container === "right" ? "RIGHT" :
+            container === LEFT ? "LEFT" :
+                container === RIGHT ? "RIGHT" :
                     container?.startsWith("day:") ? "DAY" : null;
 
         if (!containerType) return;
@@ -242,8 +258,8 @@ export default function Board() {
     async function handleDelete(id: string) {
         const container = findContainerByCardId(id);
         const containerType =
-            container === "left" ? "LEFT" :
-                container === "right" ? "RIGHT" :
+            container === LEFT ? "LEFT" :
+                container === RIGHT ? "RIGHT" :
                     container?.startsWith("day:") ? "DAY" : null;
 
         if (!containerType) return;
@@ -268,34 +284,35 @@ export default function Board() {
         if (toContainer === fromContainer) return;
 
         const fromType =
-            fromContainer === LEFT ? "LEFT" :
-                fromContainer === RIGHT ? "RIGHT" :
-                    "DAY";
-
+            fromContainer === LEFT ? "LEFT" : fromContainer === RIGHT ? "RIGHT" : "DAY";
         const toType =
-            toContainer === LEFT ? "LEFT" :
-                toContainer === RIGHT ? "RIGHT" :
-                    "DAY";
+            toContainer === LEFT ? "LEFT" : toContainer === RIGHT ? "RIGHT" : "DAY";
 
         if (!canMovePerm(role, fromType, toType)) return;
 
-        const toKey =
-            toType === "DAY" ? toContainer.replace("day:", "") : toType;
+        const toKey = toType === "DAY" ? toContainer.replace("day:", "") : toType;
 
-        // optimistic UI (optional). safer: do DB first then move.
-        // We’ll do DB first (simple + strict):
-        try {
-            await api<{ ok: boolean }>(`/pp/cards/${activeId}/move`, {
-                method: "POST",
-                body: JSON.stringify({ toType, toKey, sortIndex: 0 }),
-            });
+        // ✅ snapshot for rollback (cheap and reliable)
+        const snapLeft = leftCards;
+        const snapRight = rightCards;
+        const snapDays = dayCards;
 
-            const card = removeFromContainer(fromContainer, activeId);
-            if (!card) return;
-            addToContainer(toContainer, card);
-        } catch (err) {
+        // ✅ optimistic UI
+        const card = removeFromContainer(fromContainer, activeId);
+        if (!card) return;
+        addToContainer(toContainer, card);
+
+        // ✅ background save
+        api<{ ok: boolean }>(`/pp/cards/${activeId}/move`, {
+            method: "POST",
+            body: JSON.stringify({ toType, toKey, sortIndex: 0 }),
+        }).catch((err) => {
             console.error(err);
-        }
+            // rollback
+            setLeftCards(snapLeft);
+            setRightCards(snapRight);
+            setDayCards(snapDays);
+        });
     }
 
     return (
@@ -339,31 +356,16 @@ export default function Board() {
                 open={modalOpen}
                 mode={modalMode}
                 card={activeCard}
-                onOpenChange={setModalOpen}
+                onOpenChange={(v) => {
+                    setModalOpen(v);
+                    if (!v) setModalMode("view"); // optional: reset when closing
+                }}
                 onCreate={handleCreate}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
+                canEdit={canEditThisCard}
+                onRequestEdit={() => setModalMode("edit")}
             />
-
-            {/* quick helper: switch view->edit from outside (simple) */}
-            {modalOpen && modalMode === "view" && activeCard ? (() => {
-                const container = findContainerByCardId(activeCard.id);
-                const ct =
-                    container === LEFT ? "LEFT" :
-                        container === RIGHT ? "RIGHT" :
-                            container?.startsWith("day:") ? "DAY" : null;
-
-                if (!ct) return null;
-                if (!canEditPerm(role, ct)) return null;
-
-                return (
-                    <div className="floating-edit">
-                        <button className="btn" type="button" onClick={() => setModalMode("edit")}>
-                            ✎ Редактировать
-                        </button>
-                    </div>
-                );
-            })() : null}
         </div>
     );
 }
