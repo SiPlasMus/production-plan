@@ -11,6 +11,8 @@ import AddCardModal from "./AddCardModal";
 import DropZone from "./DropZone.tsx";
 
 type Mode = "create" | "view" | "edit";
+import { getRole } from "../../utils/auth";
+import { canCreate, canEdit as canEditPerm, canMove as canMovePerm } from "../../utils/permissions";
 
 function isoToday() {
     const d = new Date();
@@ -40,6 +42,7 @@ const RIGHT = "right";
 const dayKey = (iso: string) => `day:${iso}`;
 
 export default function Board() {
+    const role = getRole();
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: { distance: 10 }, // was 6
@@ -108,6 +111,14 @@ export default function Board() {
     }
     function openView(card: ProductionCard) {
         setActiveCard(card);
+
+        const container = findContainerByCardId(card.id);
+        const ct =
+            container === LEFT ? "LEFT" :
+                container === RIGHT ? "RIGHT" :
+                    container?.startsWith("day:") ? "DAY" : "DAY";
+
+        // If user cannot edit this container, keep view-only always
         setModalMode("view");
         setModalOpen(true);
     }
@@ -173,26 +184,80 @@ export default function Board() {
         });
     }
 
-    function handleCreate(payload: Omit<ProductionCard, "id">) {
-        const card: ProductionCard = { id: makeId(), ...payload };
+    async function handleCreate(payload: Omit<ProductionCard, "id">) {
+        if (!canCreate(role)) return;
+
+        const body = {
+            client: payload.client,
+            rank: payload.rank,
+            micron: payload.micron,
+            thickness: payload.thickness,
+            sheetSize: payload.sheetSize,
+            qtySheets: payload.qtySheets,
+            qtyWarehouse: payload.qtyWarehouse,
+            planDate: payload.date || null,
+            note: payload.note || "",
+            containerType: "LEFT",
+            containerKey: "LEFT",
+            sortIndex: 0,
+        };
+
+        const res = await api<{ ok: boolean; id: string }>("/pp/cards", {
+            method: "POST",
+            body: JSON.stringify(body),
+        });
+
+        const card: ProductionCard = { id: res.id, ...payload };
         setLeftCards((p) => [card, ...p]);
     }
 
-    function handleUpdate(id: string, payload: Omit<ProductionCard, "id">) {
+    async function handleUpdate(id: string, payload: Omit<ProductionCard, "id">) {
+        const container = findContainerByCardId(id);
+        const containerType =
+            container === "left" ? "LEFT" :
+                container === "right" ? "RIGHT" :
+                    container?.startsWith("day:") ? "DAY" : null;
+
+        if (!containerType) return;
+        if (!canEditPerm(role, containerType)) return;
+
+        await api<{ ok: boolean }>(`/pp/cards/${id}`, {
+            method: "PUT",
+            body: JSON.stringify({
+                client: payload.client,
+                rank: payload.rank,
+                micron: payload.micron,
+                thickness: payload.thickness,
+                sheetSize: payload.sheetSize,
+                qtySheets: payload.qtySheets,
+                qtyWarehouse: payload.qtyWarehouse,
+                planDate: payload.date || null,
+                note: payload.note || "",
+            }),
+        });
+
         updateCardEverywhere(id, payload);
     }
 
-    function handleDelete(id: string) {
+    async function handleDelete(id: string) {
+        const container = findContainerByCardId(id);
+        const containerType =
+            container === "left" ? "LEFT" :
+                container === "right" ? "RIGHT" :
+                    container?.startsWith("day:") ? "DAY" : null;
+
+        if (!containerType) return;
+        if (!canEditPerm(role, containerType)) return;
+
+        await api<{ ok: boolean }>(`/pp/cards/${id}`, { method: "DELETE" });
         deleteCardEverywhere(id);
     }
 
-    function onDragEnd(e: DragEndEvent) {
+    async function onDragEnd(e: DragEndEvent) {
         const activeId = String(e.active.id);
         const overId = e.over?.id ? String(e.over.id) : null;
         if (!overId) return;
 
-        // Where to drop?
-        // overId can be another card id (sortable), so we treat it as "drop into that card's container"
         const toContainer =
             overId === LEFT || overId === RIGHT || overId.startsWith("day:")
                 ? overId
@@ -200,11 +265,37 @@ export default function Board() {
 
         const fromContainer = findContainerByCardId(activeId);
         if (!toContainer || !fromContainer) return;
-        if (toContainer === fromContainer) return; // keep simple for now (no reordering)
+        if (toContainer === fromContainer) return;
 
-        const card = removeFromContainer(fromContainer, activeId);
-        if (!card) return;
-        addToContainer(toContainer, card);
+        const fromType =
+            fromContainer === LEFT ? "LEFT" :
+                fromContainer === RIGHT ? "RIGHT" :
+                    "DAY";
+
+        const toType =
+            toContainer === LEFT ? "LEFT" :
+                toContainer === RIGHT ? "RIGHT" :
+                    "DAY";
+
+        if (!canMovePerm(role, fromType, toType)) return;
+
+        const toKey =
+            toType === "DAY" ? toContainer.replace("day:", "") : toType;
+
+        // optimistic UI (optional). safer: do DB first then move.
+        // We’ll do DB first (simple + strict):
+        try {
+            await api<{ ok: boolean }>(`/pp/cards/${activeId}/move`, {
+                method: "POST",
+                body: JSON.stringify({ toType, toKey, sortIndex: 0 }),
+            });
+
+            const card = removeFromContainer(fromContainer, activeId);
+            if (!card) return;
+            addToContainer(toContainer, card);
+        } catch (err) {
+            console.error(err);
+        }
     }
 
     return (
@@ -218,9 +309,11 @@ export default function Board() {
                         items={leftCards}
                         onOpenCard={openView}
                         actions={
-                            <button className="btn btn--primary" onClick={openCreate} type="button">
-                                + Добавить
-                            </button>
+                            canCreate(role) ? (
+                                <button className="btn btn--primary" onClick={openCreate} type="button">
+                                    + Добавить
+                                </button>
+                            ) : null
                         }
                     />
                 </DropZone>
@@ -253,18 +346,24 @@ export default function Board() {
             />
 
             {/* quick helper: switch view->edit from outside (simple) */}
-            {modalOpen && modalMode === "view" && activeCard ? (
-                <div className="floating-edit">
-                    <button
-                        className="btn"
-                        type="button"
-                        onClick={() => setModalMode("edit")}
-                        title="Редактировать"
-                    >
-                        ✎ Редактировать
-                    </button>
-                </div>
-            ) : null}
+            {modalOpen && modalMode === "view" && activeCard ? (() => {
+                const container = findContainerByCardId(activeCard.id);
+                const ct =
+                    container === LEFT ? "LEFT" :
+                        container === RIGHT ? "RIGHT" :
+                            container?.startsWith("day:") ? "DAY" : null;
+
+                if (!ct) return null;
+                if (!canEditPerm(role, ct)) return null;
+
+                return (
+                    <div className="floating-edit">
+                        <button className="btn" type="button" onClick={() => setModalMode("edit")}>
+                            ✎ Редактировать
+                        </button>
+                    </div>
+                );
+            })() : null}
         </div>
     );
 }
